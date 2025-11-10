@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 
-	_ "github.com/beheryahmed1991/subscription-service.git/server/subscription/docs"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	_ "github.com/beheryahmed1991/subscription-service.git/docs"
 )
 
 // @title Subscription Service
