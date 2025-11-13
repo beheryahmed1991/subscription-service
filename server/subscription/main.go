@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/beheryahmed1991/subscription-service.git/internal/db"
+	"github.com/beheryahmed1991/subscription-service.git/internal/subscription"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -15,7 +16,6 @@ import (
 	_ "github.com/beheryahmed1991/subscription-service.git/docs"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-
 )
 
 // @title Subscription Service
@@ -47,6 +47,11 @@ func main() {
 	router.GET("/hello", func(c *gin.Context) {
 		c.String(200, "Hello, ahmed!")
 	})
+
+	subRepo := subscription.NewRepository(database)
+	subHandler := subscription.NewHandler(subRepo)
+	subHandler.RegisterRoutes(router)
+
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	if err := router.Run(":8080"); err != nil {
