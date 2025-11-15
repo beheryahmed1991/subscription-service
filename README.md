@@ -1,4 +1,8 @@
 # subscription-service
+
+for "swagger" documentation
+http://localhost:8080/swagger/index.html#/
+
 Logging: The project uses Go’s structured logger slog for request tracking, error reporting, and debugging.
 
 Database Migrations: All schema changes are handled through Goose 
