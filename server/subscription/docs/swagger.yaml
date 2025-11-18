@@ -1,8 +1,253 @@
+definitions:
+  subscription.Subscription:
+    properties:
+      created_at:
+        type: string
+      end_month:
+        type: string
+      id:
+        type: string
+      price_rub:
+        type: integer
+      service_name:
+        type: string
+      start_month:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  subscription.createSubscriptionRequest:
+    properties:
+      end_date:
+        type: string
+      price:
+        minimum: 0
+        type: integer
+      service_name:
+        type: string
+      start_date:
+        type: string
+      user_id:
+        type: string
+    required:
+    - price
+    - service_name
+    - start_date
+    - user_id
+    type: object
+  subscription.errorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  subscription.summaryResponse:
+    properties:
+      total_price:
+        type: integer
+    type: object
+  subscription.updateSubscriptionRequest:
+    properties:
+      end_date:
+        type: string
+      price:
+        type: integer
+      service_name:
+        type: string
+      start_date:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
   description: REST API for managing user subscriptions
   title: Subscription Service
   version: "1.0"
-paths: {}
+paths:
+  /subscriptions:
+    get:
+      description: List all subscriptions ordered by creation date
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/subscription.Subscription'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: List subscriptions
+      tags:
+      - subscriptions
+    post:
+      consumes:
+      - application/json
+      description: Create a new subscription entry
+      parameters:
+      - description: Subscription payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/subscription.createSubscriptionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/subscription.Subscription'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: Create subscription
+      tags:
+      - subscriptions
+  /subscriptions/{id}:
+    delete:
+      description: Delete subscription by ID
+      parameters:
+      - description: Subscription ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: Delete subscription
+      tags:
+      - subscriptions
+    get:
+      description: Get subscription by ID
+      parameters:
+      - description: Subscription ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/subscription.Subscription'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: Get subscription
+      tags:
+      - subscriptions
+    patch:
+      consumes:
+      - application/json
+      description: Partially update subscription fields
+      parameters:
+      - description: Subscription ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/subscription.updateSubscriptionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/subscription.Subscription'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: Update subscription
+      tags:
+      - subscriptions
+  /subscriptions/summary:
+    get:
+      description: Calculate total subscription cost within optional filters
+      parameters:
+      - description: Start month (YYYY-MM or MM-YYYY)
+        in: query
+        name: start
+        type: string
+      - description: End month (YYYY-MM or MM-YYYY)
+        in: query
+        name: end
+        type: string
+      - description: User ID (UUID)
+        in: query
+        name: user_id
+        type: string
+      - description: Service name
+        in: query
+        name: service_name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/subscription.summaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/subscription.errorResponse'
+      summary: Sum subscriptions
+      tags:
+      - subscriptions
 swagger: "2.0"
