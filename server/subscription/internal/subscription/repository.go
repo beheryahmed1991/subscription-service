@@ -4,16 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
 // Repository handles persistence for subscriptions.
-type Repository struct {
-	db *sql.DB
+type Store interface {
+	Create(context.Context, CreateParams) (Subscription, error)
+	GetByID(context.Context, string) (Subscription, error)
+	List(context.Context) ([]Subscription, error)
+	Update(context.Context, UpdateParams) (Subscription, error)
+	Delete(context.Context, string) error
+	SumByPeriod(context.Context, SumFilter) (int, error)
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+type Repository struct {
+	db     *sql.DB
+	logger *slog.Logger
+}
+
+func NewRepository(db *sql.DB, logger *slog.Logger) *Repository {
+	return &Repository{db: db, logger: logger}
 }
 
 func (r *Repository) Create(ctx context.Context, params CreateParams) (Subscription, error) {
@@ -39,6 +50,9 @@ func (r *Repository) Create(ctx context.Context, params CreateParams) (Subscript
 		&sub.CreatedAt,
 		&sub.UpdatedAt,
 	); err != nil {
+		if r.logger != nil {
+			r.logger.Error("insert subscription failed", "error", err)
+		}
 		return Subscription{}, fmt.Errorf("insert subscription: %w", err)
 	}
 
@@ -65,6 +79,9 @@ func (r *Repository) GetByID(ctx context.Context, id string) (Subscription, erro
 		if err == sql.ErrNoRows {
 			return Subscription{}, err
 		}
+		if r.logger != nil {
+			r.logger.Error("get subscription failed", "id", id, "error", err)
+		}
 		return Subscription{}, fmt.Errorf("select subscription: %w", err)
 	}
 
@@ -79,6 +96,9 @@ func (r *Repository) List(ctx context.Context) ([]Subscription, error) {
 
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
+		if r.logger != nil {
+			r.logger.Error("list subscriptions query failed", "error", err)
+		}
 		return nil, fmt.Errorf("list subscriptions: %w", err)
 	}
 	defer rows.Close()
@@ -96,12 +116,18 @@ func (r *Repository) List(ctx context.Context) ([]Subscription, error) {
 			&sub.CreatedAt,
 			&sub.UpdatedAt,
 		); err != nil {
+			if r.logger != nil {
+				r.logger.Error("scan subscription failed", "error", err)
+			}
 			return nil, fmt.Errorf("scan subscription: %w", err)
 		}
 		subs = append(subs, sub)
 	}
 
 	if err := rows.Err(); err != nil {
+		if r.logger != nil {
+			r.logger.Error("iterate subscriptions failed", "error", err)
+		}
 		return nil, fmt.Errorf("iterate subscriptions: %w", err)
 	}
 
@@ -161,6 +187,9 @@ func (r *Repository) Update(ctx context.Context, params UpdateParams) (Subscript
 		if err == sql.ErrNoRows {
 			return Subscription{}, err
 		}
+		if r.logger != nil {
+			r.logger.Error("update subscription failed", "id", params.ID, "error", err)
+		}
 		return Subscription{}, fmt.Errorf("update subscription: %w", err)
 	}
 
@@ -171,14 +200,23 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	const query = `DELETE FROM subscriptions WHERE id = $1`
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
+		if r.logger != nil {
+			r.logger.Error("delete subscription failed", "id", id, "error", err)
+		}
 		return fmt.Errorf("delete subscription: %w", err)
 	}
 
 	rows, err := result.RowsAffected()
 	if err != nil {
+		if r.logger != nil {
+			r.logger.Error("delete rows affected failed", "id", id, "error", err)
+		}
 		return fmt.Errorf("delete rows affected: %w", err)
 	}
 	if rows == 0 {
+		if r.logger != nil {
+			r.logger.Info("subscription not found for delete", "id", id)
+		}
 		return sql.ErrNoRows
 	}
 	return nil
@@ -212,6 +250,9 @@ func (r *Repository) SumByPeriod(ctx context.Context, filter SumFilter) (int, er
 
 	var total sql.NullInt64
 	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
+		if r.logger != nil {
+			r.logger.Error("sum subscriptions failed", "error", err)
+		}
 		return 0, fmt.Errorf("sum subscriptions: %w", err)
 	}
 

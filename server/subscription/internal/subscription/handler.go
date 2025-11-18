@@ -3,6 +3,7 @@ package subscription
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,11 +21,20 @@ const (
 
 // Handler exposes HTTP handlers for subscription resources.
 type Handler struct {
-	repo *Repository
+	repo   Store
+	logger *slog.Logger
 }
 
-func NewHandler(repo *Repository) *Handler {
-	return &Handler{repo: repo}
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type summaryResponse struct {
+	TotalPrice int `json:"total_price"`
+}
+
+func NewHandler(repo Store, logger *slog.Logger) *Handler {
+	return &Handler{repo: repo, logger: logger}
 }
 
 func (h *Handler) RegisterRoutes(router *gin.Engine) {
@@ -45,15 +55,28 @@ type createSubscriptionRequest struct {
 	EndMonth    *string `json:"end_date"`
 }
 
+// create godoc
+// @Summary Create subscription
+// @Description Create a new subscription entry
+// @Tags subscriptions
+// @Accept json
+// @Produce json
+// @Param request body createSubscriptionRequest true "Subscription payload"
+// @Success 201 {object} Subscription
+// @Failure 400 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions [post]
 func (h *Handler) create(c *gin.Context) {
 	var req createSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Info("invalid create payload", "error", err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	userID, err := uuid.Parse(req.UserID)
 	if err != nil {
+		h.logger.Info("invalid user id", "user_id", req.UserID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
 		return
 	}
@@ -86,6 +109,7 @@ func (h *Handler) create(c *gin.Context) {
 		EndMonth:    end,
 	})
 	if err != nil {
+		h.logger.Error("failed to create subscription", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -93,18 +117,39 @@ func (h *Handler) create(c *gin.Context) {
 	c.JSON(http.StatusCreated, sub)
 }
 
+// list godoc
+// @Summary List subscriptions
+// @Description List all subscriptions ordered by creation date
+// @Tags subscriptions
+// @Produce json
+// @Success 200 {array} Subscription
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions [get]
 func (h *Handler) list(c *gin.Context) {
 	subs, err := h.repo.List(c.Request.Context())
 	if err != nil {
+		h.logger.Error("failed to list subscriptions", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, subs)
 }
 
+// getByID godoc
+// @Summary Get subscription
+// @Description Get subscription by ID
+// @Tags subscriptions
+// @Produce json
+// @Param id path string true "Subscription ID"
+// @Success 200 {object} Subscription
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions/{id} [get]
 func (h *Handler) getByID(c *gin.Context) {
 	id := c.Param("id")
 	if _, err := uuid.Parse(id); err != nil {
+		h.logger.Info("invalid subscription id", "id", id)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
@@ -112,9 +157,11 @@ func (h *Handler) getByID(c *gin.Context) {
 	sub, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			h.logger.Info("subscription not found", "id", id)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
 		}
+		h.logger.Error("failed to get subscription", "id", id, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -129,6 +176,19 @@ type updateSubscriptionRequest struct {
 	EndMonth    *string `json:"end_date"`
 }
 
+// update godoc
+// @Summary Update subscription
+// @Description Partially update subscription fields
+// @Tags subscriptions
+// @Accept json
+// @Produce json
+// @Param id path string true "Subscription ID"
+// @Param request body updateSubscriptionRequest true "Fields to update"
+// @Success 200 {object} Subscription
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions/{id} [patch]
 func (h *Handler) update(c *gin.Context) {
 	idParam := c.Param("id")
 	subID, err := uuid.Parse(idParam)
@@ -139,6 +199,7 @@ func (h *Handler) update(c *gin.Context) {
 
 	var req updateSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Info("invalid update payload", "error", err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -188,9 +249,11 @@ func (h *Handler) update(c *gin.Context) {
 	sub, err := h.repo.Update(c.Request.Context(), params)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			h.logger.Info("subscription not found for update", "id", idParam)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
 		}
+		h.logger.Error("failed to update subscription", "id", idParam, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -198,18 +261,32 @@ func (h *Handler) update(c *gin.Context) {
 	c.JSON(http.StatusOK, sub)
 }
 
+// delete godoc
+// @Summary Delete subscription
+// @Description Delete subscription by ID
+// @Tags subscriptions
+// @Produce json
+// @Param id path string true "Subscription ID"
+// @Success 204 {string} string "No Content"
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions/{id} [delete]
 func (h *Handler) delete(c *gin.Context) {
 	id := c.Param("id")
 	if _, err := uuid.Parse(id); err != nil {
+		h.logger.Info("invalid subscription id for delete", "id", id)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
 
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
 		if err == sql.ErrNoRows {
+			h.logger.Info("subscription not found for delete", "id", id)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
 		}
+		h.logger.Error("failed to delete subscription", "id", id, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -217,6 +294,19 @@ func (h *Handler) delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// summary godoc
+// @Summary Sum subscriptions
+// @Description Calculate total subscription cost within optional filters
+// @Tags subscriptions
+// @Produce json
+// @Param start query string false "Start month (YYYY-MM or MM-YYYY)"
+// @Param end query string false "End month (YYYY-MM or MM-YYYY)"
+// @Param user_id query string false "User ID (UUID)"
+// @Param service_name query string false "Service name"
+// @Success 200 {object} summaryResponse
+// @Failure 400 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /subscriptions/summary [get]
 func (h *Handler) summary(c *gin.Context) {
 	var (
 		startMonth *time.Time
@@ -228,12 +318,14 @@ func (h *Handler) summary(c *gin.Context) {
 
 	if start := c.Query("start"); start != "" {
 		if startMonth, err = parseMonthPtr(start); err != nil {
+			h.logger.Info("invalid start date", "value", start)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
 	if end := c.Query("end"); end != "" {
 		if endMonth, err = parseMonthPtr(end); err != nil {
+			h.logger.Info("invalid end date", "value", end)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -246,6 +338,7 @@ func (h *Handler) summary(c *gin.Context) {
 	if user := c.Query("user_id"); user != "" {
 		parsed, err := uuid.Parse(user)
 		if err != nil {
+			h.logger.Info("invalid user_id filter", "user_id", user)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
 			return
 		}
@@ -263,6 +356,7 @@ func (h *Handler) summary(c *gin.Context) {
 		ServiceName: service,
 	})
 	if err != nil {
+		h.logger.Error("failed to summarize subscriptions", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
