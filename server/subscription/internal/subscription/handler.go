@@ -2,9 +2,11 @@ package subscription
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,9 @@ const (
 	layoutMonthYear     = "01-2006"
 	layoutFullDate      = "2006-01-02"
 	defaultDayComponent = 1
+	defaultPage         = 1
+	defaultLimit        = 2
+	maxLimit            = 100
 )
 
 // Handler exposes HTTP handlers for subscription resources.
@@ -31,6 +36,13 @@ type errorResponse struct {
 
 type summaryResponse struct {
 	TotalPrice int `json:"total_price"`
+}
+
+type listResponse struct {
+	Items []Subscription `json:"items"`
+	Page  int            `json:"page"`
+	Limit int            `json:"limit"`
+	Total int            `json:"total"`
 }
 
 func NewHandler(repo Store, logger *slog.Logger) *Handler {
@@ -119,20 +131,38 @@ func (h *Handler) create(c *gin.Context) {
 
 // list godoc
 // @Summary List subscriptions
-// @Description List all subscriptions ordered by creation date
+// @Description List subscriptions ordered by creation date with pagination
 // @Tags subscriptions
 // @Produce json
-// @Success 200 {array} Subscription
+// @Param page query int false "Page number (>=1)" default(1)
+// @Param limit query int false "Items per page (<=100)" default(20)
+// @Success 200 {object} listResponse
 // @Failure 500 {object} errorResponse
 // @Router /subscriptions [get]
 func (h *Handler) list(c *gin.Context) {
-	subs, err := h.repo.List(c.Request.Context())
+	page := parsePositiveInt(c.DefaultQuery("page", "1"), defaultPage)
+	limit := parsePositiveInt(c.DefaultQuery("limit", fmt.Sprintf("%d", defaultLimit)), defaultLimit)
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+
+	opts := ListOptions{
+		Limit:  limit,
+		Offset: (page - 1) * limit,
+	}
+
+	subs, total, err := h.repo.List(c.Request.Context(), opts)
 	if err != nil {
 		h.logger.Error("failed to list subscriptions", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, subs)
+	c.JSON(http.StatusOK, listResponse{
+		Items: subs,
+		Page:  page,
+		Limit: limit,
+		Total: total,
+	})
 }
 
 // getByID godoc
@@ -156,7 +186,8 @@ func (h *Handler) getByID(c *gin.Context) {
 
 	sub, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		// Previously compared using == which fails for wrapped errors.
+		if errors.Is(err, sql.ErrNoRows) {
 			h.logger.Info("subscription not found", "id", id)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
@@ -248,7 +279,8 @@ func (h *Handler) update(c *gin.Context) {
 
 	sub, err := h.repo.Update(c.Request.Context(), params)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		// Previously compared using == which fails for wrapped errors.
+		if errors.Is(err, sql.ErrNoRows) {
 			h.logger.Info("subscription not found for update", "id", idParam)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
@@ -281,7 +313,8 @@ func (h *Handler) delete(c *gin.Context) {
 	}
 
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		if err == sql.ErrNoRows {
+		// Previously compared using == which fails for wrapped errors.
+		if errors.Is(err, sql.ErrNoRows) {
 			h.logger.Info("subscription not found for delete", "id", id)
 			c.JSON(http.StatusNotFound, gin.H{"error": "subscription not found"})
 			return
@@ -394,4 +427,12 @@ func parseMonthPtr(value string) (*time.Time, error) {
 
 func normalizeMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), defaultDayComponent, 0, 0, 0, 0, time.UTC)
+}
+
+func parsePositiveInt(value string, fallback int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
