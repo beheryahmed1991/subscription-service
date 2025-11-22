@@ -26,7 +26,7 @@ const (
 
 // Handler exposes HTTP handlers for subscription resources.
 type Handler struct {
-	repo   Store
+	svc    Service
 	logger *slog.Logger
 }
 
@@ -45,8 +45,8 @@ type listResponse struct {
 	Total int            `json:"total"`
 }
 
-func NewHandler(repo Store, logger *slog.Logger) *Handler {
-	return &Handler{repo: repo, logger: logger}
+func NewHandler(service Service, logger *slog.Logger) *Handler {
+	return &Handler{svc: service, logger: logger}
 }
 
 func (h *Handler) RegisterRoutes(router *gin.Engine) {
@@ -113,7 +113,7 @@ func (h *Handler) create(c *gin.Context) {
 		end = &parsed
 	}
 
-	sub, err := h.repo.Create(c.Request.Context(), CreateParams{
+	sub, err := h.svc.Create(c.Request.Context(), CreateParams{
 		ServiceName: strings.TrimSpace(req.ServiceName),
 		PriceRUB:    req.PriceRUB,
 		UserID:      userID,
@@ -151,7 +151,7 @@ func (h *Handler) list(c *gin.Context) {
 		Offset: (page - 1) * limit,
 	}
 
-	subs, total, err := h.repo.List(c.Request.Context(), opts)
+	subs, total, err := h.svc.List(c.Request.Context(), opts)
 	if err != nil {
 		h.logger.Error("failed to list subscriptions", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -184,7 +184,7 @@ func (h *Handler) getByID(c *gin.Context) {
 		return
 	}
 
-	sub, err := h.repo.GetByID(c.Request.Context(), id)
+	sub, err := h.svc.GetByID(c.Request.Context(), id)
 	if err != nil {
 		// Previously compared using == which fails for wrapped errors.
 		if errors.Is(err, sql.ErrNoRows) {
@@ -277,7 +277,7 @@ func (h *Handler) update(c *gin.Context) {
 		}
 	}
 
-	sub, err := h.repo.Update(c.Request.Context(), params)
+	sub, err := h.svc.Update(c.Request.Context(), params)
 	if err != nil {
 		// Previously compared using == which fails for wrapped errors.
 		if errors.Is(err, sql.ErrNoRows) {
@@ -312,7 +312,7 @@ func (h *Handler) delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
 		// Previously compared using == which fails for wrapped errors.
 		if errors.Is(err, sql.ErrNoRows) {
 			h.logger.Info("subscription not found for delete", "id", id)
@@ -382,7 +382,7 @@ func (h *Handler) summary(c *gin.Context) {
 		service = &name
 	}
 
-	total, err := h.repo.SumByPeriod(c.Request.Context(), SumFilter{
+	total, err := h.svc.SumByPeriod(c.Request.Context(), SumFilter{
 		StartMonth:  startMonth,
 		EndMonth:    endMonth,
 		UserID:      userID,

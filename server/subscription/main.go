@@ -60,7 +60,8 @@ func main() {
 	})
 
 	subRepo := subscription.NewRepository(database, appLogger)
-	subHandler := subscription.NewHandler(subRepo, appLogger)
+	subService := subscription.NewService(subRepo)
+	subHandler := subscription.NewHandler(subService, appLogger)
 	subHandler.RegisterRoutes(router)
 
 	docs.SwaggerInfo.Host = cfg.Swagger.Host
