@@ -265,63 +265,64 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+const sumByPeriodSQL = `
+WITH ranges AS (
+    SELECT
+        s.price_rub,
+        GREATEST(s.start_month, COALESCE($1::date, s.start_month)) AS eff_start,
+        LEAST(
+            COALESCE(s.end_month, COALESCE($2::date, CURRENT_DATE)),
+            COALESCE($2::date, COALESCE(s.end_month, CURRENT_DATE))
+        ) AS eff_end
+    FROM subscriptions s
+    WHERE ($3::uuid IS NULL OR s.user_id = $3::uuid)
+      AND ($4::text IS NULL OR LOWER(s.service_name) = LOWER($4::text))
+      AND s.start_month <= COALESCE($2::date, COALESCE(s.end_month, CURRENT_DATE))
+      AND COALESCE(s.end_month, COALESCE($2::date, CURRENT_DATE)) >= COALESCE($1::date, s.start_month)
+)
+SELECT COALESCE(SUM(
+    price_rub *
+    (
+        (DATE_PART('year', eff_end) - DATE_PART('year', eff_start)) * 12 +
+        (DATE_PART('month', eff_end) - DATE_PART('month', eff_start)) + 1
+    )
+), 0)
+FROM ranges
+WHERE eff_end >= eff_start;
+`
+
 func (r *Repository) SumByPeriod(ctx context.Context, filter SumFilter) (int, error) {
-	ds := r.builder.From("subscriptions").Select(
-		"price_rub", "start_month", "end_month",
+	var (
+		start interface{}
+		end   interface{}
+		user  interface{}
+		name  interface{}
 	)
 
-	if filter.UserID != nil {
-		ds = ds.Where(goqu.C("user_id").Eq(*filter.UserID))
-	}
-	if filter.ServiceName != nil {
-		ds = ds.Where(goqu.L("lower(service_name)").Eq(strings.ToLower(*filter.ServiceName)))
-	}
 	if filter.StartMonth != nil {
-		ds = ds.Where(goqu.Or(
-			goqu.C("end_month").IsNull(),
-			goqu.C("end_month").Gte(*filter.StartMonth),
-		))
+		start = normalizeMonth(*filter.StartMonth)
 	}
 	if filter.EndMonth != nil {
-		ds = ds.Where(goqu.C("start_month").Lte(*filter.EndMonth))
+		end = normalizeMonth(*filter.EndMonth)
 	}
-
-	query, args, err := ds.ToSQL()
-	if err != nil {
-		return 0, fmt.Errorf("build sum query: %w", err)
+	if filter.UserID != nil {
+		user = *filter.UserID
 	}
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("sum subscriptions query: %w", err)
-	}
-	defer rows.Close()
-
-	var total int
-	for rows.Next() {
-		var price int
-		var start time.Time
-		var end sql.NullTime
-		if err := rows.Scan(&price, &start, &end); err != nil {
-			return 0, fmt.Errorf("scan sum row: %w", err)
+	if filter.ServiceName != nil {
+		name = strings.TrimSpace(*filter.ServiceName)
+		if name == "" {
+			name = nil
 		}
-
-		overlapStart, overlapEnd, ok := clampRange(start, end, filter.StartMonth, filter.EndMonth)
-		if !ok {
-			continue
-		}
-
-		months := monthsBetween(overlapStart, overlapEnd)
-		if months == 0 {
-			continue
-		}
-		total += price * months
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("rows error: %w", err)
 	}
 
-	return total, nil
+	var total sql.NullInt64
+	if err := r.db.QueryRowContext(ctx, sumByPeriodSQL, start, end, user, name).Scan(&total); err != nil {
+		return 0, fmt.Errorf("sum subscriptions: %w", err)
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return int(total.Int64), nil
 }
 
 func monthsBetween(start, end time.Time) int {
