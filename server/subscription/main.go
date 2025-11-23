@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	docs "github.com/beheryahmed1991/subscription-service.git/docs"
@@ -67,7 +72,27 @@ func main() {
 	docs.SwaggerInfo.Host = cfg.Swagger.Host
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	if err := router.Run(":" + cfg.App.Port); err != nil {
-		fmt.Println("Failed to start server:", err)
+	srv := &http.Server{
+		Addr:    ":" + cfg.App.Port,
+		Handler: router,
 	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			appLogger.Error("http server error", "err", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		appLogger.Error("graceful shutdown failed", "err", err)
+	}
+
+	fmt.Println("Server gracefully stopped")
 }
